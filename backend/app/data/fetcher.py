@@ -1,7 +1,13 @@
-"""Historical OHLC data fetching.
+"""OHLC orchestration.
 
-Primary source: Yahoo Finance via `yfinance`.
-Fallback: CSV file with columns Date,Open,High,Low,Close,Volume.
+Flow:
+    1. CSV path (if given) — bypass cache and providers entirely.
+    2. Look in SQLite cache for the requested (ticker, range).
+    3. Ask the market calendar which trading days in the range are missing.
+    4. For any gap, walk the provider priority list (Twelve Data → Tiingo →
+       Stooq → Yahoo). 429s fall through to the next provider; other
+       provider errors are collected and surfaced only if every provider fails.
+    5. Persist the gap fill to SQLite and return the caller's requested slice.
 """
 from __future__ import annotations
 
@@ -9,6 +15,9 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
+
+from . import cache, providers
+from .calendar import missing_trading_days
 
 
 REQUIRED_COLS = ["Open", "High", "Low", "Close", "Volume"]
@@ -18,45 +27,7 @@ class DataFetchError(RuntimeError):
     """Raised when OHLC data cannot be fetched or is invalid."""
 
 
-def fetch_yahoo(ticker: str, start: date, end: date) -> pd.DataFrame:
-    """Download daily OHLC from Yahoo Finance.
-
-    `end` is exclusive on Yahoo's side, so we extend by one day so the
-    caller's inclusive range is respected.
-    """
-    import yfinance as yf  # imported lazily so tests can run without network
-
-    end_plus = pd.Timestamp(end) + pd.Timedelta(days=1)
-    df = yf.download(
-        ticker,
-        start=pd.Timestamp(start).strftime("%Y-%m-%d"),
-        end=end_plus.strftime("%Y-%m-%d"),
-        progress=False,
-        auto_adjust=True,
-    )
-    if df is None or df.empty:
-        raise DataFetchError(
-            f"No data returned for ticker '{ticker}' in {start}..{end}. "
-            "Check the symbol and date range."
-        )
-
-    # yfinance may return a MultiIndex when multiple tickers are requested;
-    # flatten to the single-ticker case.
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-
-    missing = [c for c in REQUIRED_COLS if c not in df.columns]
-    if missing:
-        raise DataFetchError(f"Provider response missing columns: {missing}")
-
-    df = df[REQUIRED_COLS].copy()
-    df.index = pd.to_datetime(df.index).tz_localize(None)
-    df.index.name = "Date"
-    return df.dropna()
-
-
 def load_csv(path: str | Path) -> pd.DataFrame:
-    """Load OHLC from a CSV with a Date column and OHLCV columns."""
     df = pd.read_csv(path)
     if "Date" not in df.columns:
         raise DataFetchError("CSV must contain a 'Date' column.")
@@ -68,21 +39,59 @@ def load_csv(path: str | Path) -> pd.DataFrame:
     return df[REQUIRED_COLS].dropna()
 
 
+def _fetch_from_providers(ticker: str, start: date, end: date) -> pd.DataFrame:
+    active = providers.active()
+    if not active:
+        raise DataFetchError("No data providers are available.")
+
+    errors: list[str] = []
+    for provider in active:
+        try:
+            df = provider.fetch(ticker, start, end)
+            if df.empty:
+                errors.append(f"{provider.NAME}: empty response")
+                continue
+            return df
+        except providers.RateLimitError as e:
+            errors.append(f"{provider.NAME}: rate limited ({e})")
+        except providers.ProviderError as e:
+            errors.append(f"{provider.NAME}: {e}")
+        except Exception as e:  # network / parse errors — try next provider
+            errors.append(f"{provider.NAME}: {type(e).__name__}: {e}")
+
+    raise DataFetchError(
+        f"All providers failed for '{ticker}' in {start}..{end}. "
+        + "; ".join(errors)
+    )
+
+
 def get_ohlc(
     ticker: str,
     start: date,
     end: date,
     csv_path: str | Path | None = None,
 ) -> pd.DataFrame:
-    """Single entry point used by the API layer.
-
-    If `csv_path` is provided, load from CSV and slice to the range.
-    Otherwise fetch from Yahoo Finance.
-    """
     if csv_path is not None:
         df = load_csv(csv_path)
         df = df.loc[str(start) : str(end)]
         if df.empty:
             raise DataFetchError("CSV contains no rows in the requested range.")
         return df
-    return fetch_yahoo(ticker, start, end)
+
+    cached_df = cache.get_cached(ticker, start, end)
+    already = cache.cached_dates(ticker, start, end)
+    missing = missing_trading_days(ticker, start, end, already)
+
+    if missing:
+        gap_start, gap_end = missing[0], missing[-1]
+        fetched = _fetch_from_providers(ticker, gap_start, gap_end)
+        cache.save(ticker, fetched)
+        cached_df = cache.get_cached(ticker, start, end)
+
+    if cached_df.empty:
+        raise DataFetchError(
+            f"No data available for '{ticker}' in {start}..{end}. "
+            "Check the symbol and date range."
+        )
+
+    return cached_df.loc[str(start) : str(end)]

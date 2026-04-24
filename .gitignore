@@ -43,6 +43,11 @@ Thumbs.db
 # ───── Vercel ─────
 .vercel
 
+# ───── Local data caches ─────
+*.db
+*.sqlite
+*.sqlite3
+
 # ───── Build output ─────
 dist/
 build/
