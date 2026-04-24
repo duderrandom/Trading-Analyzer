@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Trading Strategy Analyzer</title>
+  <link rel="stylesheet" href="./styles.css" />
+
+  <!-- Chart.js + date adapter (via CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◢◣</span>
+      <div>
+        <h1>Trading Strategy Analyzer</h1>
+        <p class="tagline">An educational tool for backtesting rule-based strategies. Not a prediction engine.</p>
+      </div>
+    </div>
+    <div class="api-status" id="apiStatus" title="Backend status">
+      <span class="dot"></span><span class="label">checking…</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- ─── Left: configuration form ─── -->
+    <aside class="panel form-panel">
+      <form id="backtestForm">
+        <h2>Configuration</h2>
+
+        <label>
+          <span>Ticker</span>
+          <input type="text" id="ticker" value="AAPL" required maxlength="15" autocomplete="off" />
+        </label>
+
+        <div class="row">
+          <label>
+            <span>Start date</span>
+            <input type="date" id="startDate" required />
+          </label>
+          <label>
+            <span>End date</span>
+            <input type="date" id="endDate" required />
+          </label>
+        </div>
+
+        <label>
+          <span>Initial capital ($)</span>
+          <input type="number" id="initialCapital" value="10000" min="1" step="100" required />
+        </label>
+
+        <h3>Strategies</h3>
+        <div id="strategyList" class="strategy-list">
+          <!-- populated from /api/strategies -->
+        </div>
+
+        <details class="params">
+          <summary>Strategy parameters</summary>
+          <div class="params-grid">
+            <label>
+              <span>MA short</span>
+              <input type="number" id="shortWindow" value="20" min="2" max="200" />
+            </label>
+            <label>
+              <span>MA long</span>
+              <input type="number" id="longWindow" value="50" min="5" max="400" />
+            </label>
+            <label>
+              <span>RSI period</span>
+              <input type="number" id="rsiPeriod" value="14" min="2" max="100" />
+            </label>
+            <label>
+              <span>RSI oversold</span>
+              <input type="number" id="rsiOversold" value="30" min="1" max="49" step="1" />
+            </label>
+            <label>
+              <span>RSI overbought</span>
+              <input type="number" id="rsiOverbought" value="70" min="51" max="99" step="1" />
+            </label>
+          </div>
+        </details>
+
+        <details class="params">
+          <summary>Trading costs (optional)</summary>
+          <div class="params-grid">
+            <label>
+              <span>Commission / trade ($)</span>
+              <input type="number" id="commissionPerTrade" value="0" min="0" step="0.01" />
+            </label>
+            <label>
+              <span>Commission / share ($)</span>
+              <input type="number" id="commissionPerShare" value="0" min="0" step="0.001" />
+            </label>
+            <label>
+              <span>Slippage (bps)</span>
+              <input type="number" id="slippageBps" value="0" min="0" max="1000" step="0.5" />
+            </label>
+          </div>
+        </details>
+
+        <div class="form-actions">
+          <button type="submit" id="runBtn">Run backtest</button>
+          <button type="button" id="exportBtn" disabled>Export CSV</button>
+        </div>
+        <p class="error" id="errorMsg" hidden></p>
+      </form>
+
+      <section class="education">
+        <h3>How it works</h3>
+        <details open>
+          <summary>Moving Average Crossover</summary>
+          <p>Go long when the short SMA crosses above the long SMA; flat otherwise.
+             Trend-following: great in sustained trends, gets whipsawed in chop.</p>
+        </details>
+        <details>
+          <summary>RSI Mean Reversion</summary>
+          <p>Enter long when RSI drops below the oversold threshold; exit when RSI
+             rises above overbought. Opposite philosophy from the MA strategy.</p>
+        </details>
+        <details>
+          <summary>Buy &amp; Hold</summary>
+          <p>Baseline. Any active strategy that can't beat buy-and-hold on this
+             window isn't adding value here.</p>
+        </details>
+
+        <h3>Understanding the metrics</h3>
+        <details>
+          <summary>Total return</summary>
+          <p>Cumulative gain: <code>final / initial − 1</code>. Easy to compare,
+             ignores duration and volatility. +50% over 1 year ≠ +50% over 10 years.</p>
+        </details>
+        <details>
+          <summary>Annualized (CAGR)</summary>
+          <p>Constant yearly growth rate producing the same final equity:
+             <code>(final/initial)^(1/years) − 1</code>. The right number for
+             comparing across different window lengths. Past CAGR is a
+             description, not a forecast.</p>
+        </details>
+        <details>
+          <summary>Max drawdown</summary>
+          <p>Largest peak-to-trough equity decline on the window. This is a
+             <em>risk</em> metric — it tells you the worst it felt.
+             A −50% drawdown needs +100% to recover. If you couldn't live
+             through it, the return doesn't matter.</p>
+        </details>
+        <details>
+          <summary>Sharpe ratio</summary>
+          <p>Return per unit of volatility, annualized:
+             <code>mean(excess) / stdev(excess) × √252</code>.
+             Rule of thumb: &lt;0.5 weak, 0.5–1 decent, 1–2 good, &gt;2
+             suspicious (probably overfit). Treats upside as risk; assumes
+             normal returns.</p>
+        </details>
+        <details>
+          <summary>Win rate</summary>
+          <p>Fraction of completed BUY→SELL round-trips that made money.
+             <strong>Does not imply profitability.</strong> A 30%-win trend
+             strategy with big winners beats a 90%-win one with huge losses.
+             Descriptive, not evaluative. Shows "—" when no trades have closed.</p>
+        </details>
+        <details>
+          <summary>Number of trades</summary>
+          <p>Proxy for turnover. Under ~20 round-trips, results are mostly
+             noise — any outcome is luck. High turnover magnifies the costs
+             we don't charge by default.</p>
+        </details>
+        <details>
+          <summary>Reading them together</summary>
+          <ol style="margin:0.3rem 0 0.5rem; padding-left: 1.1rem; color: var(--muted); font-size: 0.83rem;">
+            <li>Drawdown first — if unlivable, return is irrelevant.</li>
+            <li>Then CAGR — normalizes for window length.</li>
+            <li>Then Sharpe — did the return justify the ride?</li>
+            <li>Check trade count — too few = premature conclusion.</li>
+            <li>Win rate is for curiosity, not decisions.</li>
+          </ol>
+        </details>
+
+        <h3>Limitations</h3>
+        <details>
+          <summary>What this tool ignores</summary>
+          <ul>
+            <li>No taxes. Default no commissions/slippage (opt in above).</li>
+            <li>All-in / all-out sizing only.</li>
+            <li>Single ticker — survivorship bias on names that still trade today.</li>
+            <li>In-sample results on a fixed window; not predictive of future returns.</li>
+          </ul>
+        </details>
+      </section>
+    </aside>
+
+    <!-- ─── Right: results ─── -->
+    <section class="results" id="results" hidden>
+      <div class="banner" id="bestBanner"></div>
+
+      <section class="panel">
+        <h2>Performance summary</h2>
+        <div class="table-wrapper">
+          <table id="metricsTable">
+            <thead>
+              <tr>
+                <th>Strategy</th>
+                <th>Total return</th>
+                <th>Annualized</th>
+                <th>Max drawdown</th>
+                <th>Sharpe</th>
+                <th>Win rate</th>
+                <th>Trades</th>
+                <th>Final value</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Equity curves</h2>
+        <p class="hint">Portfolio value over time, starting from the initial capital.</p>
+        <div class="chart-wrapper"><canvas id="equityChart"></canvas></div>
+      </section>
+
+      <section class="panel">
+        <h2>Price chart with trade markers</h2>
+        <div class="price-controls">
+          <label for="priceStrategySelect">Show trades for:</label>
+          <select id="priceStrategySelect"></select>
+        </div>
+        <div class="chart-wrapper"><canvas id="priceChart"></canvas></div>
+      </section>
+
+      <section class="panel" id="tradesPanel">
+        <h2>Trade log</h2>
+        <div class="table-wrapper">
+          <table id="tradesTable">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Action</th>
+                <th>Price</th>
+                <th>Shares</th>
+                <th>Portfolio value</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+    </section>
+
+    <section class="results empty" id="emptyState">
+      <div class="placeholder">
+        <h2>No backtest yet</h2>
+        <p>Pick a ticker, date range, and at least one strategy, then click
+           <strong>Run backtest</strong> to see equity curves, trade markers,
+           and performance metrics side-by-side.</p>
+        <p class="disclaimer">
+          ⚠ Educational tool only. Past performance is not predictive of
+          future returns. Backtests ignore factors that erode real-world
+          results — especially costs, slippage, and taxes.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Backend: <code id="apiBase">http://localhost:8000</code></span>
+    <span>•</span>
+    <span>Docs: <a id="apiDocsLink" href="http://localhost:8000/docs" target="_blank" rel="noopener">/docs</a></span>
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>
