@@ -22,6 +22,7 @@ from app.models.schemas import (
     Trade,
 )
 from app.strategies import REGISTRY, get_strategy
+from app.strategies.evaluator import evaluate as evaluate_custom
 
 
 app = FastAPI(
@@ -66,8 +67,17 @@ def list_strategies() -> list[dict]:
 
 
 def _run_single(req: BacktestRequest, strategy_id: str, prices):
-    label, signal_fn, _desc = get_strategy(strategy_id)
-    signals = signal_fn(prices, req.params)
+    if strategy_id == "custom":
+        if req.custom is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Strategy 'custom' requires a 'custom' spec in the request.",
+            )
+        label = req.custom.label
+        signals = evaluate_custom(req.custom, prices)
+    else:
+        label, signal_fn, _desc = get_strategy(strategy_id)
+        signals = signal_fn(prices, req.params)
     broker = Broker(
         commission_per_trade=req.broker.commission_per_trade,
         commission_per_share=req.broker.commission_per_share,

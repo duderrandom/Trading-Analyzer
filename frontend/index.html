@@ -100,6 +100,89 @@
           </div>
         </details>
 
+        <details class="params">
+          <summary>Custom strategy (build your own)</summary>
+          <div class="custom-body">
+            <label class="custom-toggle">
+              <input type="checkbox" id="customEnabled" />
+              <span>Include a custom strategy in this backtest</span>
+            </label>
+
+            <label>
+              <span>Label</span>
+              <input type="text" id="customLabel" value="My Strategy" maxlength="80" />
+            </label>
+
+            <fieldset class="custom-rule">
+              <legend>Entry — when flat, go long if…</legend>
+              <div class="custom-rule-row" data-rule="entry">
+                <select class="custom-left-ind">
+                  <option value="sma">SMA</option>
+                  <option value="ema">EMA</option>
+                  <option value="rsi" selected>RSI</option>
+                  <option value="close">Close price</option>
+                </select>
+                <input type="number" class="custom-left-period" value="14" min="2" max="400" />
+                <select class="custom-op">
+                  <option value="lt" selected>is less than</option>
+                  <option value="gt">is greater than</option>
+                  <option value="crosses_above">crosses above</option>
+                  <option value="crosses_below">crosses below</option>
+                </select>
+                <select class="custom-right-kind">
+                  <option value="const" selected>a value</option>
+                  <option value="indicator">another indicator</option>
+                </select>
+                <input type="number" class="custom-right-const" value="30" step="0.1" />
+                <select class="custom-right-ind" hidden>
+                  <option value="sma">SMA</option>
+                  <option value="ema">EMA</option>
+                  <option value="rsi">RSI</option>
+                  <option value="close">Close price</option>
+                </select>
+                <input type="number" class="custom-right-period" value="50" min="2" max="400" hidden />
+              </div>
+            </fieldset>
+
+            <fieldset class="custom-rule">
+              <legend>Exit — when long, go flat if…</legend>
+              <div class="custom-rule-row" data-rule="exit">
+                <select class="custom-left-ind">
+                  <option value="sma">SMA</option>
+                  <option value="ema">EMA</option>
+                  <option value="rsi" selected>RSI</option>
+                  <option value="close">Close price</option>
+                </select>
+                <input type="number" class="custom-left-period" value="14" min="2" max="400" />
+                <select class="custom-op">
+                  <option value="gt" selected>is greater than</option>
+                  <option value="lt">is less than</option>
+                  <option value="crosses_above">crosses above</option>
+                  <option value="crosses_below">crosses below</option>
+                </select>
+                <select class="custom-right-kind">
+                  <option value="const" selected>a value</option>
+                  <option value="indicator">another indicator</option>
+                </select>
+                <input type="number" class="custom-right-const" value="70" step="0.1" />
+                <select class="custom-right-ind" hidden>
+                  <option value="sma">SMA</option>
+                  <option value="ema">EMA</option>
+                  <option value="rsi">RSI</option>
+                  <option value="close">Close price</option>
+                </select>
+                <input type="number" class="custom-right-period" value="50" min="2" max="400" hidden />
+              </div>
+            </fieldset>
+
+            <p class="custom-hint">
+              Defaults above encode a classic RSI(14) mean-reversion:
+              enter when RSI &lt; 30, exit when RSI &gt; 70.
+              Try <em>SMA 20 crosses above SMA 50</em> for a moving-average strategy.
+            </p>
+          </div>
+        </details>
+
         <div class="form-actions">
           <button type="submit" id="runBtn">Run backtest</button>
           <button type="button" id="exportBtn" disabled>Export CSV</button>

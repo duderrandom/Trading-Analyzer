@@ -6,8 +6,10 @@ from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
+from app.models.custom_spec import CustomStrategy
 
-StrategyName = Literal["buy_hold", "ma_crossover", "rsi"]
+
+StrategyName = Literal["buy_hold", "ma_crossover", "rsi", "custom"]
 
 
 class StrategyParams(BaseModel):
@@ -46,6 +48,7 @@ class BacktestRequest(BaseModel):
     initial_capital: float = Field(default=10_000.0, gt=0)
     params: StrategyParams = Field(default_factory=StrategyParams)
     broker: BrokerConfig = Field(default_factory=BrokerConfig)
+    custom: Optional[CustomStrategy] = None
 
     @field_validator("ticker")
     @classmethod

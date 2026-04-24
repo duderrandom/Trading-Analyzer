@@ -17,6 +17,7 @@
     buy_hold:     "#4ea1ff",
     ma_crossover: "#2fd48f",
     rsi:          "#f6b93b",
+    custom:       "#c084fc",
   };
   const FALLBACK_COLOR = "#c4c6cc";
 
@@ -134,6 +135,62 @@
     }
   }
 
+  // ─── Custom strategy builder ──────────────────────────────────────
+  function indicatorNode(kind, period) {
+    if (kind === "close") return { price: "close" };
+    if (kind === "rsi")   return { ind: "rsi", period };
+    return { ind: kind, period };  // sma | ema
+  }
+
+  function compileRule(ruleEl) {
+    const leftKind = ruleEl.querySelector(".custom-left-ind").value;
+    const leftPer  = +ruleEl.querySelector(".custom-left-period").value;
+    const op       = ruleEl.querySelector(".custom-op").value;
+    const rightKind = ruleEl.querySelector(".custom-right-kind").value;
+
+    let right;
+    if (rightKind === "const") {
+      right = { const: +ruleEl.querySelector(".custom-right-const").value };
+    } else {
+      const rIndKind = ruleEl.querySelector(".custom-right-ind").value;
+      const rPer     = +ruleEl.querySelector(".custom-right-period").value;
+      right = indicatorNode(rIndKind, rPer);
+    }
+    return { op, left: indicatorNode(leftKind, leftPer), right };
+  }
+
+  function setupCustomBuilder() {
+    document.querySelectorAll(".custom-rule-row").forEach((row) => {
+      const rightKind   = row.querySelector(".custom-right-kind");
+      const rightConst  = row.querySelector(".custom-right-const");
+      const rightInd    = row.querySelector(".custom-right-ind");
+      const rightPeriod = row.querySelector(".custom-right-period");
+      const leftKind    = row.querySelector(".custom-left-ind");
+      const leftPeriod  = row.querySelector(".custom-left-period");
+
+      function sync() {
+        // RHS visibility
+        const useConst = rightKind.value === "const";
+        rightConst.hidden  = !useConst;
+        rightInd.hidden    =  useConst;
+        rightPeriod.hidden =  useConst || rightInd.value === "close";
+        // LHS "close" has no period
+        leftPeriod.hidden = leftKind.value === "close";
+      }
+      [rightKind, rightInd, leftKind].forEach((el) => el.addEventListener("change", sync));
+      sync();
+    });
+  }
+
+  function buildCustomSpec() {
+    if (!$("customEnabled").checked) return null;
+    const label = $("customLabel").value.trim() || "Custom Strategy";
+    const rows = document.querySelectorAll(".custom-rule-row");
+    const entry = compileRule(rows[0]);
+    const exit_ = compileRule(rows[1]);
+    return { label, entry, exit: exit_ };
+  }
+
   // ─── Submit handler ───────────────────────────────────────────────
   async function runBacktest(evt) {
     evt.preventDefault();
@@ -159,9 +216,10 @@
     const selected = Array.from(
       document.querySelectorAll('input[name="strategy"]:checked')
     ).map((el) => el.value);
+    const customOn = $("customEnabled").checked;
 
-    if (selected.length === 0) {
-      setError("Pick at least one strategy.");
+    if (selected.length === 0 && !customOn) {
+      setError("Pick at least one strategy (or enable the custom one).");
       return null;
     }
 
@@ -177,11 +235,14 @@
       return null;
     }
 
-    return {
+    const customSpec = buildCustomSpec();
+    const strategies = customSpec ? [...selected, "custom"] : selected;
+
+    const payload = {
       ticker: $("ticker").value.trim().toUpperCase(),
       start_date: start,
       end_date: end,
-      strategies: selected,
+      strategies,
       initial_capital: +$("initialCapital").value,
       params: {
         short_window: short,
@@ -196,6 +257,8 @@
         slippage_bps:         +$("slippageBps").value,
       },
     };
+    if (customSpec) payload.custom = customSpec;
+    return payload;
   }
 
   // ─── Rendering ────────────────────────────────────────────────────
@@ -435,6 +498,7 @@
     form.addEventListener("submit", runBacktest);
     exportBtn.addEventListener("click", exportCsv);
 
+    setupCustomBuilder();
     loadStrategies();
     checkApiStatus();
     setInterval(checkApiStatus, 15_000);
