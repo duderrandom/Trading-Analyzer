@@ -9,7 +9,8 @@
   const API_BASE = (() => {
     // Allow overriding via ?api=http://host:port for deployment flexibility.
     const fromQuery = new URLSearchParams(location.search).get("api");
-    return (fromQuery || "http://localhost:8000").replace(/\/$/, "");
+    const isLocal = location.hostname === "localhost" || location.hostname === "127.0.0.1";
+    return (fromQuery || (isLocal ? "http://localhost:8000" : "")).replace(/\/$/, "");
   })();
 
   // Per-strategy display colors (match CSS variables).
