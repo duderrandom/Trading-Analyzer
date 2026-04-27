@@ -104,7 +104,7 @@
 
   async function checkApiStatus() {
     try {
-      await apiGet("/");
+      await apiGet("/api/health");
       apiStatus.classList.add("ok");
       apiStatus.classList.remove("down");
       apiStatus.querySelector(".label").textContent = "connected";
